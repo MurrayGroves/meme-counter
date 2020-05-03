@@ -203,8 +203,8 @@ async def on_message(message):
                 break
 
         #Edit the leaderboard to the new scores
-        channel = client.get_channel(705851333147754509)
-        msg = await channel.fetch_message(705854918463848509)
+        channel = client.get_channel(channelID)
+        msg = await channel.fetch_message(messageID)
         await msg.edit(content=content)
 
     if message.content.startswith(prefix): #If message is command
