@@ -91,10 +91,10 @@ async def cmd_ping(message):
 #Send leaderboard message
 async def cmd_set_leaderboard(message):
 
-    message = await message.channel.send("***Leaderboard***")
-    channelID = message.channel.id
-    messageID = message.id
-    
+    newmessage = await message.channel.send("***Leaderboard***")
+    channelID = newmessage.channel.id
+    messageID = newmessage.id
+
     #Write channel and message ID to ids.data
     f = open("data/ids.data","w+")
     f.write(f"{channelID}\n{messageID}")
