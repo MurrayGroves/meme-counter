@@ -71,6 +71,8 @@ global messageID
 try:
     f = open("data/ids.data")
     channelID,messageID = f.read().splitlines()
+    channelID = int(channelID)
+    messageID = int(messageID)
     f.close()
 
 except: #If fail, check if in development or being hosted (crude I know, I might switch to using environment variables)
