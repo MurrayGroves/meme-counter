@@ -90,15 +90,16 @@ async def cmd_ping(message):
 
 #Send leaderboard message
 async def cmd_set_leaderboard(message):
+
+    message = await message.channel.send("***Leaderboard***")
     channelID = message.channel.id
     messageID = message.id
-
+    
     #Write channel and message ID to ids.data
     f = open("data/ids.data","w+")
     f.write(f"{channelID}\n{messageID}")
     f.close()
 
-    await message.channel.send("***Leaderboard***")
 
 #When bot is connected, delete token from memory (why not, might as well) and print connected message
 @client.event
