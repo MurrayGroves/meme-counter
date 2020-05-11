@@ -29,28 +29,6 @@ try:
 except:
     sys.exit("No token")
 
-#Check if memes file exists, if not, make it
-try:
-    f = open("data/memes.data")
-    f.read()
-    f.close()
-
-except:
-    f = open("data/memes.data", "w+")
-    f.write("")
-    f.close()
-
-#Check if leaderboard file exists, if not, make it
-try:
-    f = open("data/leaderboard.data")
-    f.read()
-    f.close()
-
-except:
-    f = open("data/leaderboard.data","w+")
-    f.write("{}")
-    f.close()
-
 #Get token from file
 f = open("data/token.data")
 token = f.read().splitlines()[0]
@@ -67,36 +45,82 @@ client = discord.Client()
 
 global channelID
 global messageID
-#Try to get channel and message IDs from file
-try:
-    f = open("data/ids.data")
-    channelID,messageID = f.read().splitlines()
-    channelID = int(channelID)
-    messageID = int(messageID)
-    f.close()
 
-except: #If fail, check if in development or being hosted (crude I know, I might switch to using environment variables)
-    if platform.system() == "Windows":
-        channelID = 705851333147754509
-        messageID = 705854918463848509
+#Help command
+async def cmd_help(message):
+    em = discord.Embed(title="Help",description="Whenever a user sends a file or a link to a file (excluding Discord links), the bot logs it and increases that user's meme count which is displayed in the leaderboard channel. If the meme is reposted, the bot sends a message pinging the original sender.",colour=random.randint(0,16777215))
+    em.add_field(name=f"{prefix}score",value="See your score",inline=False)
+    em.add_field(name=f"{prefix}set_leaderboard",value="Set the leaderboard channel, it is advised that this channel is read only so that the leaderboard message is always visible",inline=False)
 
-    else:
-        channelID = 705916979814596678
-        messageID = 705917546834034698
+    await message.channel.send(embed=em)
 
 #Test command
 async def cmd_ping(message):
     await message.channel.send("pong")
 
+#View your score
+async def cmd_score(message):
+    f = open(f"data/{message.guild.id}/leaderboard.data")
+    leaderboard = json.load(f)
+    f.close()
+
+    memes = leaderboard[str(message.author.id)]
+
+    positions = []
+    for i in leaderboard:
+        positions.append([int(leaderboard[i]),i])
+
+    #Sort leaderboard
+    positions.sort()
+
+    position = str(positions.index([int(memes),str(message.author.id)])+1)
+
+    try:
+        if position[-1] == "1" and position[-2] != "1":
+            position += "st"
+
+        elif position[-1] == "2" and position[-2] != "1":
+            position += "nd"
+
+        elif position[-1] == "3" and position[-2] != "1":
+            position += "rd"
+
+        else:
+            position += "th"
+
+    except:
+        if position[-1] == "1":
+            position += "st"
+
+        elif position[-1] == "2":
+            position += "nd"
+
+        elif position[-1] == "3":
+            position += "rd"
+
+        else:
+            position += "th"
+
+    em = discord.Embed(title="Score",colour=random.randint(0,16777215))
+    em.add_field(name="Position",value=position)
+    em.add_field(name="Memes",value=memes)
+
+    await message.channel.send(embed=em)
+
 #Send leaderboard message
 async def cmd_set_leaderboard(message):
+    if not (message.author.guild_permissions.administrator or message.author.guild_permissions.manage_channels):
+        em = discord.Embed(title="Permissions Error",description="You need the manage channels permission to run this command",colour=16711680)
+        await message.channel.send(embed=em)
+        return
 
     newmessage = await message.channel.send("***Leaderboard***")
     channelID = newmessage.channel.id
     messageID = newmessage.id
+    os.system(f"mkdir \"data/{message.guild.id}\"")
 
     #Write channel and message ID to ids.data
-    f = open("data/ids.data","w+")
+    f = open(f"data/{message.guild.id}/ids.data","w+")
     f.write(f"{channelID}\n{messageID}")
     f.close()
 
@@ -117,18 +141,15 @@ async def on_message(message):
         return
 
     meme = False
-    fileSaved = False
     if len(message.attachments) > 0: #If the message has attachments
         meme = True #Define message as meme
         memeUrl = message.attachments[0].url #Assume message has only one attachment and get it's CDN url
-        fileSaved = True
-        #memeUrl = re.search("(?P<url>https?://[^\s]+)", memeUrl).group("url")
-        f = open("temp","wb") #Open temp in write bytes mode
+        f = open(f"data/{message.guild.id}/temp","wb") #Open temp in write bytes mode
         await message.attachments[0].save(f) #Save the attachment to the temp file
         f.close()
 
         #Read raw bytes from the temp file (the attachment)
-        f = open("temp","rb")
+        f = open(f"data/{message.guild.id}/temp","rb")
         contents = f.read()
         f.close()
 
@@ -138,19 +159,28 @@ async def on_message(message):
         meme = True #Define message as meme
         memeUrl = re.search("(?P<url>https?://[^\s]+)", message.content).group("url") #Extract the url from the message
 
-        urllib.request.urlretrieve(memeUrl,"temp") #Save the link contents to temp (does not work with Discord CDN links as they have web scraper protection - even with user agent changed, I could just pretend that's to stop people from taking memes from other people though)
-        f = open("temp","rb") #Read raw bytes from the temp file (the link contents)
+        urllib.request.urlretrieve(memeUrl,f"data/{message.guild.id}/temp") #Save the link contents to temp (does not work with Discord CDN links as they have web scraper protection - even with user agent changed)
+        f = open(f"data/{message.guild.id}/temp","rb") #Read raw bytes from the temp file (the link contents)
         contents = f.read()
         f.close()
         hash = hashlib.md5(contents).hexdigest() #Hash the raw bytes (weird but it works)
 
     if meme: #If message is a meme
         print("meme") #Scientifically log that a meme was detected
-        f = open("data/memes.data")
-        memes = f.read().splitlines() #Get a list of past meme hashes
+        try:
+            f = open(f"data/{message.guild.id}/memes.data")
+            memes = f.read().splitlines() #Get a list of past meme hashes
+            f.close()
+        except:
+            f = open(f"data/{message.guild.id}/memes.data","w+")
+            f.close()
+            f = open(f"data/{message.guild.id}/memes.data")
+            memes = f.read().splitlines() #Get a list of past meme hashes
+            f.close()
+
         for x in memes: #Run through the meme hashes
             if hash in x: #If message's meme hash is in the file
-                em = discord.Embed(title="Don't steal fucker",description="This meme has already been sent idiot",colour=16711680) #Define an angry embed (in red of course)
+                em = discord.Embed(title="Repost Detected!",description="This meme has already been sent, thief.",colour=16711680) #Define an angry embed (in red of course)
                 em.add_field(name="URL",value=memeUrl) #Attach url for the meme (in case of spam)
 
                 for i in memes: #Run through all the meme hashes
@@ -162,14 +192,21 @@ async def on_message(message):
                 return #Return to prevent leaderboard changes
 
         #Write meme hash to memes.data
-        f = open("data/memes.data","a")
+        f = open(f"data/{message.guild.id}/memes.data","a")
         f.write(f"\n{hash} - {message.author.id}")
         f.close()
 
-        #Load leaderboard into a dictionary
-        f = open("data/leaderboard.data")
-        leaderboard = json.load(f)
-        f.close()
+        try:
+            #Load leaderboard into a dictionary
+            f = open(f"data/{message.guild.id}/leaderboard.data")
+            leaderboard = json.load(f)
+            f.close()
+
+        except:
+            f = open(f"data/{message.guild.id}/leaderboard.data","w+")
+            f.write("{}")
+            f.close()
+            leaderboard = {}
 
         #Try to add 1 to author's score
         try:
@@ -180,7 +217,7 @@ async def on_message(message):
             leaderboard[str(message.author.id)] = "1"
 
         #Dump dictionary to leaderboard.data
-        f = open("data/leaderboard.data","w")
+        f = open(f"data/{message.guild.id}/leaderboard.data","w")
         json.dump(leaderboard,f)
         f.close()
 
@@ -194,21 +231,26 @@ async def on_message(message):
         print(positions) #Print leaderboard for debugging purposes
         content = "***Leaderboard***"
 
-        user = client.get_user(int(positions[-1][1]))
-        await client.change_presence(activity=discord.Game(name=f"@{user.name} - {positions[-1][0]}"))
-
         for i in range(5): #Run through top 5 scores
             if i == 0: #Since list is being accessed from the end, 1 (-1) is the first index, not 0
                 continue
             try: #Try to add score to content
-                content = content + "\n" + str(i) + " - " + f"<@{positions[-i][1]}>" + " - " + str(positions[-i][0])
+                content = content + "\n" + str(i) + " - " + f"<@{positions[-i][1]}>" + " - " + str(positions[-i][0]) + " memes"
             except: #If failed, there are less than 5 entries, break the loop
                 break
 
-        #Edit the leaderboard to the new scores
-        channel = client.get_channel(channelID)
-        msg = await channel.fetch_message(messageID)
-        await msg.edit(content=content)
+        try:
+            f = open(f"data/{message.guild.id}/ids.data")
+            channelID,messageID = f.read().splitlines()
+            f.close()
+
+            #Edit the leaderboard to the new scores
+            channel = client.get_channel(int(channelID))
+            msg = await channel.fetch_message(int(messageID))
+            await msg.edit(content=content)
+
+        except:
+            pass
 
     if message.content.startswith(prefix): #If message is command
         try:
