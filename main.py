@@ -51,6 +51,20 @@ client = discord.Client()
 global channelID
 global messageID
 
+#Change the bot's presence
+async def cmd_setpresence(message):
+    if message.author.id == 245994206965792780:
+        msg = message.content.replace("{}setpresence ".format(prefix),"")
+        await client.change_presence(activity=discord.Game(name=msg))
+        em = discord.Embed(title="Set Presence",colour=random.randint(0,16777215))
+        em.add_field(name="Status",value=msg)
+        await message.channel.send(embed=em)
+
+    else:
+        em = discord.Embed(title="Access Denied",description="I'm sorry, you are not a bot admin.",colour=16711680)
+        await message.channel.send(embed=em)
+        return
+
 #Info command
 async def cmd_info(message):
     em = discord.Embed(title="Info",colour=random.randint(0,16777215))
