@@ -168,6 +168,22 @@ async def cmd_set_leaderboard(message):
     f.close()
 
 
+@client.event
+async def on_guild_join(guild):
+    me = client.get_user(245994206965792780)
+    if me.dm_channel == None:
+        await me.create_dm()
+
+    await me.dm_channel.send(f"Joined server: {guild.name} ({guild.id}) with {str(len(guild.members))} members")
+
+@client.event
+async def on_guild_remove(guild):
+    me = client.get_user(245994206965792780)
+    if me.dm_channel == None:
+        await me.create_dm()
+
+    await me.dm_channel.send(f"Left server: {guild.name} ({guild.id})")
+
 #When bot is connected, delete token from memory (why not, might as well) and print connected message
 @client.event
 async def on_ready():
