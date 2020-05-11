@@ -12,6 +12,11 @@ import sys
 import json
 import random
 import re
+import time
+import math
+
+global startTime
+startTime = time.time()
 
 #Create data directory, it will fail if it already exists so pass if errors
 try:
@@ -46,11 +51,35 @@ client = discord.Client()
 global channelID
 global messageID
 
+#Info command
+async def cmd_info(message):
+    em = discord.Embed(title="Info",colour=random.randint(0,16777215))
+    em.add_field(name="Invite Link",value="https://discordapp.com/oauth2/authorize?client_id=705916758371991642&scope=bot&permissions=67136512",inline=False)
+    em.add_field(name="Users",inline=False,value=len(list(client.get_all_members())))
+    em.add_field(name="Servers",inline=False,value=len(client.guilds))
+    em.add_field(name="My Server",inline=False,value="https://discord.gg/GYUS2Jg")
+    uptime = time.time() - startTime
+    uptime = math.floor(uptime)
+    seconds = uptime % 60
+    minutes = math.floor(((uptime - seconds) / 60) % 60)
+    hours = math.floor(minutes / 60)
+    days = math.floor(hours / 24)
+    uptime = "Days: {} , Hours: {} , Minutes: {} , Seconds: {}".format(days, hours, minutes, seconds)
+    em.add_field(name="Uptime",inline=False,value=uptime)
+    em.add_field(name="My Library",inline=False,value="I use discord.py")
+    await message.channel.send(embed=em)
+
+#Get Invite
+async def cmd_invite(message):
+    await message.channel.send("https://discordapp.com/oauth2/authorize?client_id=705916758371991642&scope=bot&permissions=67136512")
+
 #Help command
 async def cmd_help(message):
     em = discord.Embed(title="Help",description="Whenever a user sends a file or a link to a file (excluding Discord links), the bot logs it and increases that user's meme count which is displayed in the leaderboard channel. If the meme is reposted, the bot sends a message pinging the original sender.",colour=random.randint(0,16777215))
     em.add_field(name=f"{prefix}score",value="See your score",inline=False)
     em.add_field(name=f"{prefix}set_leaderboard",value="Set the leaderboard channel, it is advised that this channel is read only so that the leaderboard message is always visible",inline=False)
+    em.add_field(name=f"{prefix}invite",value="Get the bot's invite link",inline=False)
+    em.add_field(name=f"{prefix}info",value="Get info on the bot",inline=False)
 
     await message.channel.send(embed=em)
 
