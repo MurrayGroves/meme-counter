@@ -7,13 +7,21 @@ import urllib.request
 
 #Misc
 import platform
-import os
+import subprocess
 import sys
 import json
 import random
 import re
 import time
 import math
+import io
+import sqlite3
+
+#Async stuff
+import asyncio
+import aiohttp
+import aiofiles
+import concurrent.futures
 
 global startTime
 startTime = time.time()
@@ -25,7 +33,7 @@ try:
 except:
     pass
 
-#Check if token file exists, if not, exit. (Not a good idea to ask for input incase program is being run headless)
+#Check if token file exists
 try:
     f = open("data/token.data")
     f.read()
@@ -47,23 +55,72 @@ prefix = ","
 global client
 client = discord.Client()
 
+#Perform background tasks asynchronously
+async def backgroundLoop():
+    while True:
+        #Asynchronously read status from data/status.data
+        f = await aiofiles.open("data/status.data")
+        presence = await f.read()
+        await f.close()
 
-global channelID
-global messageID
+        #Every time Discord pushes a new build, the bot's presence gets reset, this just sets it every 10 minutes to ensure it's mostly always there
+        await client.change_presence(activity=discord.Game(name=presence))
+        asyncio.sleep(600)
 
-#Change the bot's presence
-async def cmd_setpresence(message):
+#Change the bot's status
+async def cmd_setstatus(message):
+    #Check if message author is me
     if message.author.id == 245994206965792780:
+        #Set status
         msg = message.content.replace("{}setpresence ".format(prefix),"")
         await client.change_presence(activity=discord.Game(name=msg))
-        em = discord.Embed(title="Set Presence",colour=random.randint(0,16777215))
-        em.add_field(name="Status",value=msg)
+
+        #Send confirmation message
+        em = discord.Embed(title="Status",description=msg,colour=random.randint(0,16777215))
         await message.channel.send(embed=em)
 
+        #Asynchronously store status in data/status.data
+        f = await aiofiles.open("data/status.data","w+")
+        await f.write(msg)
+        await f.close()
+
+    #If message author is not me
     else:
+        #Send access denied message
         em = discord.Embed(title="Access Denied",description="I'm sorry, you are not a bot admin.",colour=16711680)
         await message.channel.send(embed=em)
         return
+
+#Toggle deletion of reposts
+async def cmd_toggle_deletion(message):
+    if not message.author.guild_permissions.administrator:
+        em = discord.Embed(title="Access Denied",description="You must be a server administrator to run this command.",colour=16711680)
+        await message.channel.send(embed=em)
+        return
+
+    try:
+        f = await aiofiles.open(f"data/{message.guild.id}/delete.data")
+        contents = await f.read()
+        await f.close()
+
+    except:
+        contents = ""
+
+    if "1" in contents:
+        f = await aiofiles.open(f"data/{message.guild.id}/delete.data","w+")
+        await f.write("")
+        await f.close()
+
+        em = discord.Embed(title="Toggle Deletion",description="Deletion is now disabled", colour=random.randint(0,16777215))
+        await message.channel.send(embed=em)
+
+    else:
+        f = await aiofiles.open(f"data/{message.guild.id}/delete.data","w+")
+        await f.write("1")
+        await f.close()
+
+        em = discord.Embed(title="Toggle Deletion",description="Deletion is now enabled", colour=random.randint(0,16777215))
+        await message.channel.send(embed=em)
 
 #Info command
 async def cmd_info(message):
@@ -72,6 +129,8 @@ async def cmd_info(message):
     em.add_field(name="Users",inline=False,value=len(list(client.get_all_members())))
     em.add_field(name="Servers",inline=False,value=len(client.guilds))
     em.add_field(name="My Server",inline=False,value="https://discord.gg/GYUS2Jg")
+
+    #Calculate uptime
     uptime = time.time() - startTime
     uptime = math.floor(uptime)
     seconds = uptime % 60
@@ -79,6 +138,7 @@ async def cmd_info(message):
     hours = math.floor(minutes / 60)
     days = math.floor(hours / 24)
     uptime = "Days: {} , Hours: {} , Minutes: {} , Seconds: {}".format(days, hours, minutes, seconds)
+
     em.add_field(name="Uptime",inline=False,value=uptime)
     em.add_field(name="My Library",inline=False,value="I use discord.py")
     await message.channel.send(embed=em)
@@ -92,6 +152,7 @@ async def cmd_help(message):
     em = discord.Embed(title="Help",description="Whenever a user sends a file or a link to a file (excluding Discord links), the bot logs it and increases that user's meme count which is displayed in the leaderboard channel. If the meme is reposted, the bot sends a message pinging the original sender.",colour=random.randint(0,16777215))
     em.add_field(name=f"{prefix}score",value="See your score",inline=False)
     em.add_field(name=f"{prefix}set_leaderboard",value="Set the leaderboard channel, it is advised that this channel is read only so that the leaderboard message is always visible",inline=False)
+    em.add_field(name=f"{prefix}toggle_deletion",value="Toggle whether the bot deletes reposts",inline=False)
     em.add_field(name=f"{prefix}invite",value="Get the bot's invite link",inline=False)
     em.add_field(name=f"{prefix}info",value="Get info on the bot",inline=False)
 
@@ -103,12 +164,15 @@ async def cmd_ping(message):
 
 #View your score
 async def cmd_score(message):
-    f = open(f"data/{message.guild.id}/leaderboard.data")
-    leaderboard = json.load(f)
-    f.close()
+    #Asynchronously load guilds leaderboard
+    f = await aiofiles.open(f"data/{message.guild.id}/leaderboard.data")
+    leaderboard = await json.load(f)
+    await f.close()
 
-    memes = leaderboard[str(message.author.id)]
+    #Get user's score
+    score = leaderboard[str(message.author.id)]
 
+    #Load everyone's score into a list
     positions = []
     for i in leaderboard:
         positions.append([int(leaderboard[i]),i])
@@ -116,8 +180,10 @@ async def cmd_score(message):
     #Sort leaderboard
     positions.sort()
 
-    position = str(positions.index([int(memes),str(message.author.id)])+1)
+    #Get author's position on the leaderboard
+    position = str(positions.index([int(score),str(message.author.id)])+1)
 
+    #Some stupid code to add the correct suffix to the position
     try:
         if position[-1] == "1" and position[-2] != "1":
             position += "st"
@@ -144,32 +210,38 @@ async def cmd_score(message):
         else:
             position += "th"
 
-    em = discord.Embed(title="Score",colour=random.randint(0,16777215))
+    #Create message embed
+    em = discord.Embed(title="Your Score",colour=random.randint(0,16777215))
     em.add_field(name="Position",value=position)
-    em.add_field(name="Memes",value=memes)
+    em.add_field(name="Score",value=score)
 
     await message.channel.send(embed=em)
 
 #Send leaderboard message
 async def cmd_set_leaderboard(message):
+    #Check if message author has admin perms or manage channels perm
     if not (message.author.guild_permissions.administrator or message.author.guild_permissions.manage_channels):
         em = discord.Embed(title="Permissions Error",description="You need the manage channels permission to run this command",colour=16711680)
         await message.channel.send(embed=em)
         return
 
+    #Send leaderboard message
     newmessage = await message.channel.send("***Leaderboard***")
     channelID = newmessage.channel.id
     messageID = newmessage.id
-    os.system(f"mkdir \"data/{message.guild.id}\"")
+
+    #Create guild's data folder
+    subprocess.popen(f"mkdir \"data/{message.guild.id}\"")
 
     #Write channel and message ID to ids.data
-    f = open(f"data/{message.guild.id}/ids.data","w+")
-    f.write(f"{channelID}\n{messageID}")
-    f.close()
+    f = await aiofiles.open(f"data/{message.guild.id}/ids.data","w+")
+    await f.write(f"{channelID}\n{messageID}")
+    await f.close()
 
 
 @client.event
 async def on_guild_join(guild):
+    #DM me when the bot joins a new server
     me = client.get_user(245994206965792780)
     if me.dm_channel == None:
         await me.create_dm()
@@ -178,24 +250,29 @@ async def on_guild_join(guild):
 
 @client.event
 async def on_guild_remove(guild):
+    #DM me when the bot leaves a server
     me = client.get_user(245994206965792780)
     if me.dm_channel == None:
         await me.create_dm()
 
     await me.dm_channel.send(f"Left server: {guild.name} ({guild.id})")
 
-#When bot is connected, delete token from memory (why not, might as well) and print connected message
+#When bot is connected, print a message
 @client.event
 async def on_ready():
-    global token
-    del token
     print('Logged in as {0.user}'.format(client))
+
+def getHash(myString):
+    return hashlib.md5(myString).hexdigest()
+
+def regexSearch(term,myString):
+    return re.search(term, myString).group("url")
 
 @client.event
 async def on_message(message):
     global prefix
 
-    #Ignore messages from the bot
+    #Ignore messages from the bot (prevents looping by malicious parties)
     if message.author == client.user:
         return
 
@@ -203,68 +280,103 @@ async def on_message(message):
     if len(message.attachments) > 0: #If the message has attachments
         meme = True #Define message as meme
         memeUrl = message.attachments[0].url #Assume message has only one attachment and get it's CDN url
-        f = open(f"data/{message.guild.id}/temp","wb") #Open temp in write bytes mode
-        await message.attachments[0].save(f) #Save the attachment to the temp file
-        f.close()
 
+        #await message.attachments[0].save(f"data/{message.guild.id}/temp") #Save the attachment to the temp file
+        fd = io.BytesIO()
+        await message.attachments[0].save(fd)
         #Read raw bytes from the temp file (the attachment)
-        f = open(f"data/{message.guild.id}/temp","rb")
-        contents = f.read()
-        f.close()
+        #f = await aiofiles.open(f"data/{message.guild.id}/temp","rb")
+        contents = fd.read()
+        fd.close()
 
-        hash = hashlib.md5(contents).hexdigest() #Hash the raw attachment bytes (weird but I mean it works, if someone really wanted to get around the detection, it would be really easy though)
+        loop = asyncio.get_event_loop()
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
+        hash = await loop.run_in_executor(executor,getHash,contents) #Hash the raw attachment bytes (weird but I mean it works, if someone really wanted to get around the detection, it would be really easy though)
+        print(str(hash))
 
     elif "https://" in message.content: #If the message contains a link
         meme = True #Define message as meme
-        memeUrl = re.search("(?P<url>https?://[^\s]+)", message.content).group("url") #Extract the url from the message
+        loop = asyncio.get_event_loop()
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
+        memeUrl = await loop.run_in_executor(executor,regexSearch,"(?P<url>https?://[^\s]+)",message.content)
 
-        urllib.request.urlretrieve(memeUrl,f"data/{message.guild.id}/temp") #Save the link contents to temp (does not work with Discord CDN links as they have web scraper protection - even with user agent changed)
-        f = open(f"data/{message.guild.id}/temp","rb") #Read raw bytes from the temp file (the link contents)
-        contents = f.read()
-        f.close()
-        hash = hashlib.md5(contents).hexdigest() #Hash the raw bytes (weird but it works)
+        async with aiohttp.ClientSession() as session:
+            async with session.get(memeUrl) as resp:
+                #fd = await aiofiles.open(f"data/{message.guild.id}/temp", 'wb')
+                fd = io.BytesIO()
+                while True:
+                    chunk = await resp.content.read(1024)
+                    if not chunk:
+                        break
+                    fd.write(chunk)
+
+        #urllib.request.urlretrieve(memeUrl,f"data/{message.guild.id}/temp") #Save the link contents to temp (does not work with Discord CDN links as they have web scraper protection - even with user agent changed)
+        #f = await aiofiles.open(f"data/{message.guild.id}/temp","rb") #Read raw bytes from the temp file (the link contents)
+        contents = fd.read()
+        fd.close()
+        hash = await loop.run_in_executor(executor,getHash,contents) #Hash the raw attachment bytes (weird but I mean it works, if someone really wanted to get around the detection, it would be really easy though)
+
 
     if meme: #If message is a meme
-        print("meme") #Scientifically log that a meme was detected
+        print("{} ({}) > {} ({}): Meme Detected".format(message.guild.name,message.guild.id,message.author.name,message.author.id)) #Log that a meme has been detected
         try:
-            f = open(f"data/{message.guild.id}/memes.data")
-            memes = f.read().splitlines() #Get a list of past meme hashes
-            f.close()
+            f = await aiofiles.open(f"data/{message.guild.id}/memes.data")
+            memes = await f.read()
+            memes = memes.splitlines() #Get a list of past meme hashes
+            await f.close()
+
+        #If file doesn't exist
         except:
-            f = open(f"data/{message.guild.id}/memes.data","w+")
-            f.close()
-            f = open(f"data/{message.guild.id}/memes.data")
-            memes = f.read().splitlines() #Get a list of past meme hashes
-            f.close()
+            #Create file
+            f = await aiofiles.open(f"data/{message.guild.id}/memes.data","w+")
+            await f.close()
+            #Set memes to blank
+            memes = []
 
         for x in memes: #Run through the meme hashes
             if hash in x: #If message's meme hash is in the file
-                em = discord.Embed(title="Repost Detected!",description="This meme has already been sent, thief.",colour=16711680) #Define an angry embed (in red of course)
-                em.add_field(name="URL",value=memeUrl) #Attach url for the meme (in case of spam)
+                delete = False
+                try:
+                    f = await aiofiles.open(f"data/{message.guild.id}/delete.data")
+                    contents = await f.read()
+                    await f.close()
 
-                for i in memes: #Run through all the meme hashes
-                    if hash in i: #If hash is current meme
-                        i = i.replace(f"{hash} - ","") #Get original author ID
-                        em.add_field(name="Original Author",value=f"<@{i}>") #Add author mention to embed
+                    if "1" in contents:
+                        delete = True
 
-                await message.channel.send(embed=em) #Send embed
-                return #Return to prevent leaderboard changes
+                except:
+                    pass
+
+                if delete == False:
+                    em = discord.Embed(title="Repost Detected!",description="This meme has already been sent, thief.",colour=16711680) #Define an angry embed (in red of course)
+                    em.add_field(name="URL",value=memeUrl) #Attach url for the meme (in case of spam)
+
+                    for i in memes: #Run through all the meme hashes
+                        if hash in i: #If hash is current meme
+                            i = i.replace(f"{hash} - ","") #Get original author ID
+                            em.add_field(name="Original Author",value=f"<@{i}>") #Add author mention to embed
+
+                    await message.channel.send(embed=em) #Send embed
+                    return #Return to prevent leaderboard changes
+
+                else:
+                    await message.delete(delay=1.0)
 
         #Write meme hash to memes.data
-        f = open(f"data/{message.guild.id}/memes.data","a")
-        f.write(f"\n{hash} - {message.author.id}")
-        f.close()
+        f = await aiofiles.open(f"data/{message.guild.id}/memes.data","a")
+        await f.write(f"\n{hash} - {message.author.id}")
+        await f.close()
 
         try:
             #Load leaderboard into a dictionary
-            f = open(f"data/{message.guild.id}/leaderboard.data")
+            f = await aiofiles.open(f"data/{message.guild.id}/leaderboard.data")
             leaderboard = json.load(f)
-            f.close()
+            await f.close()
 
         except:
-            f = open(f"data/{message.guild.id}/leaderboard.data","w+")
-            f.write("{}")
-            f.close()
+            f = await aiofiles.open(f"data/{message.guild.id}/leaderboard.data","w+")
+            await f.write("{}")
+            await f.close()
             leaderboard = {}
 
         #Try to add 1 to author's score
@@ -276,9 +388,9 @@ async def on_message(message):
             leaderboard[str(message.author.id)] = "1"
 
         #Dump dictionary to leaderboard.data
-        f = open(f"data/{message.guild.id}/leaderboard.data","w")
+        f = await aiofiles.open(f"data/{message.guild.id}/leaderboard.data","w")
         json.dump(leaderboard,f)
-        f.close()
+        await f.close()
 
         #Load dictionary into a 2d list (for ordering - dictionaries in Python are not ordered)
         positions = []
@@ -287,7 +399,6 @@ async def on_message(message):
 
         #Sort leaderboard
         positions.sort()
-        print(positions) #Print leaderboard for debugging purposes
         content = "***Leaderboard***"
 
         for i in range(5): #Run through top 5 scores
@@ -299,9 +410,10 @@ async def on_message(message):
                 break
 
         try:
-            f = open(f"data/{message.guild.id}/ids.data")
-            channelID,messageID = f.read().splitlines()
-            f.close()
+            f = await aiofiles.open(f"data/{message.guild.id}/ids.data")
+            toSplit = await f.read()
+            channelID,messageID = toSplit.splitlines()
+            await f.close()
 
             #Edit the leaderboard to the new scores
             channel = client.get_channel(int(channelID))
