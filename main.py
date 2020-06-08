@@ -230,8 +230,12 @@ async def cmd_set_leaderboard(message):
     channelID = newmessage.channel.id
     messageID = newmessage.id
 
-    #Create guild's data folder
-    subprocess.popen(f"mkdir \"data/{message.guild.id}\"")
+    try:
+        #Create guild's data folder
+        subprocess.Popen(f"mkdir \"data/{message.guild.id}\"",shell=True)
+
+    except:
+        pass
 
     #Write channel and message ID to ids.data
     f = await aiofiles.open(f"data/{message.guild.id}/ids.data","w+")
@@ -362,15 +366,23 @@ async def on_message(message):
                 else:
                     await message.delete(delay=1.0)
 
-        #Write meme hash to memes.data
-        f = await aiofiles.open(f"data/{message.guild.id}/memes.data","a")
-        await f.write(f"\n{hash} - {message.author.id}")
-        await f.close()
+        try:
+            #Write meme hash to memes.data
+            f = await aiofiles.open(f"data/{message.guild.id}/memes.data","a")
+            await f.write(f"\n{hash} - {message.author.id}")
+            await f.close()
+
+        except:
+            #Write meme hash to memes.data
+            f = await aiofiles.open(f"data/{message.guild.id}/memes.data","w+")
+            await f.write(f"\n{hash} - {message.author.id}")
+            await f.close()
 
         try:
             #Load leaderboard into a dictionary
             f = await aiofiles.open(f"data/{message.guild.id}/leaderboard.data")
-            leaderboard = json.load(f)
+            content = await f.read()
+            leaderboard = json.loads(content)
             await f.close()
 
         except:
@@ -389,7 +401,9 @@ async def on_message(message):
 
         #Dump dictionary to leaderboard.data
         f = await aiofiles.open(f"data/{message.guild.id}/leaderboard.data","w")
-        json.dump(leaderboard,f)
+        toWrite = json.dumps(leaderboard)
+        print(toWrite)
+        await f.write(toWrite)
         await f.close()
 
         #Load dictionary into a 2d list (for ordering - dictionaries in Python are not ordered)
