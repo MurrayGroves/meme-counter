@@ -72,7 +72,7 @@ async def cmd_setstatus(message):
     #Check if message author is me
     if message.author.id == 245994206965792780:
         #Set status
-        msg = message.content.replace("{}setpresence ".format(prefix),"")
+        msg = message.content.replace("{}setstatus ".format(prefix),"")
         await client.change_presence(activity=discord.Game(name=msg))
 
         #Send confirmation message
@@ -306,19 +306,17 @@ async def on_message(message):
 
         async with aiohttp.ClientSession() as session:
             async with session.get(memeUrl) as resp:
-                #fd = await aiofiles.open(f"data/{message.guild.id}/temp", 'wb')
-                fd = io.BytesIO()
+
+                contents = b""
                 while True:
                     chunk = await resp.content.read(1024)
                     if not chunk:
                         break
-                    fd.write(chunk)
+                    contents += chunk
 
-        #urllib.request.urlretrieve(memeUrl,f"data/{message.guild.id}/temp") #Save the link contents to temp (does not work with Discord CDN links as they have web scraper protection - even with user agent changed)
-        #f = await aiofiles.open(f"data/{message.guild.id}/temp","rb") #Read raw bytes from the temp file (the link contents)
-        contents = fd.read()
-        fd.close()
+        print(contents)
         hash = await loop.run_in_executor(executor,getHash,contents) #Hash the raw attachment bytes (weird but I mean it works, if someone really wanted to get around the detection, it would be really easy though)
+        print(hash)
 
 
     if meme: #If message is a meme
