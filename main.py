@@ -491,7 +491,6 @@ async def on_message(message):
                     except:
                         pass
 
-                    break
             except:
                 pass
             count += 1
