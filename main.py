@@ -4,6 +4,7 @@ import discord
 from PIL import Image
 from numpy import asarray
 import numpy
+import cv2
 import urllib.request
 
 # Misc
@@ -50,8 +51,7 @@ f = open("data/token.data")
 token = f.read().splitlines()[0]
 f.close()
 
-# Set prefix global
-global prefix
+# Set prefix
 prefix = ","
 
 # Define Discord client object
@@ -329,59 +329,38 @@ async def on_ready():
     print("Logged in as {0.user}".format(client))
 
 
-def getHash(myString):
-    return hashlib.md5(myString).hexdigest()
-
-
+# Function to use regex on given string
 def regexSearch(term, myString):
     return re.search(term, myString).group("url")
 
 
-def pretty_date(time=False):
-    """
-    Get a datetime object or a int() Epoch timestamp and return a
-    pretty string like 'an hour ago', 'Yesterday', '3 months ago',
-    'just now', etc
-    """
-    from datetime import datetime, timedelta
+# Function to convert middle frame of video to Image object
+def convertToImage(message, extension):
+    vid = cv2.VideoCapture(f"data/{message.guild.id}/temp.{extension}")
 
-    now = datetime.now() + timedelta(hours=-2)
-    if type(time) is int:
-        diff = now - datetime.fromtimestamp(time)
-    elif isinstance(time, datetime):
-        diff = now - time
-    elif not time:
-        diff = now - now
-    day_diff = diff.days
-    second_diff = diff.seconds
+    currentFrame = 0
+    while True:
+        ret, frame = vid.read()
 
-    if day_diff < 0:
-        return ""
+        if ret:
+            currentFrame += 1
 
-    if day_diff == 0:
-        if second_diff < 10:
-            return "just now"
-        if second_diff < 60:
-            return str(second_diff) + " seconds ago"
-        if second_diff < 120:
-            return "a minute ago"
-        if second_diff < 3600:
-            return str(second_diff / 60) + " minutes ago"
-        if second_diff < 7200:
-            return "an hour ago"
-        if second_diff < 86400:
-            return str(second_diff / 3600) + " hours ago"
-    if day_diff == 1:
-        return "Yesterday"
-    if day_diff < 7:
-        return str(day_diff) + " days ago"
-    if day_diff < 31:
-        return str(day_diff / 7) + " weeks ago"
-    if day_diff < 365:
-        return str(day_diff / 30) + " months ago"
-    return str(day_diff / 365) + " years ago"
+        else:
+            vid.release()
+            break
+
+    vid = cv2.VideoCapture(f"data/{message.guild.id}/temp.{extension}")
+    for i in range(int(currentFrame / 2)):
+        ret, frame = vid.read()
+
+    vid.release()
+
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    newMeme = Image.fromarray(frame)
+    return newMeme
 
 
+# Run upon receiving message
 @client.event
 async def on_message(message):
     global prefix
@@ -403,7 +382,21 @@ async def on_message(message):
         # Read raw bytes from the temp file (the attachment)
         # f = await aiofiles.open(f"data/{message.guild.id}/temp","rb")
 
-        newMeme = Image.open(fd).resize((150, 150))
+        try:
+            newMeme = Image.open(fd)
+
+        except:
+            extension = message.attachments[0].filename.split(".")[1]
+
+            f = await aiofiles.open(f"data/{message.guild.id}/temp.{extension}", "wb")
+            await f.write(fd.getbuffer())
+            await f.close()
+
+            loop = asyncio.get_event_loop()
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
+            newMeme = await loop.run_in_executor(
+                executor, convertToImage, message, extension
+            )
 
     elif "https://" in message.content:  # If the message contains a link
         meme = True  # Define message as meme
@@ -424,28 +417,57 @@ async def on_message(message):
                     contents += chunk
 
         fd = io.BytesIO(contents)
-        newMeme = Image.open(fd).resize((150, 150))
+        try:
+            newMeme = Image.open(fd)
+
+        except:
+            extension = memeUrl.split(".")[-1].split("?")[0]
+
+            f = await aiofiles.open(f"data/{message.guild.id}/temp.{extension}", "wb")
+            await f.write(fd.getbuffer())
+            await f.close()
+
+            loop = asyncio.get_event_loop()
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
+            newMeme = await loop.run_in_executor(
+                executor, convertToImage, message, extension
+            )
 
     if meme:  # If message is a meme
-        print(
-            "{} ({}) > {} ({}): Meme Detected".format(
-                message.guild.name,
-                message.guild.id,
-                message.author.name,
-                message.author.id,
-            )
-        )  # Log that a meme has been detected
-
-        newMeme.putalpha(255)
-        originalArray = asarray(newMeme)
         try:
-            if sys.platform == "linux" or sys.platform == "linux2":
-                os.system(f"mkdir data/{message.guild.id}/images")
+            if (
+                ".png" in message.attachments[0].filename
+                or ".jpg" in message.attachments[0].filename
+            ):
+                newMeme.putalpha(255)
 
             else:
-                os.system(f"mkdir data\{message.guild.id}\images")
+                try:
+                    newMeme.seek(int(newMeme.n_frames / 2))
+
+                except:
+                    pass
+
         except:
-            pass
+            if (
+                ".png" in memeUrl.split(".")[-1].split("?")[0]
+                or ".jpg" in memeUrl.split(".")[-1].split("?")[0]
+            ):
+                newMeme.putalpha(255)
+
+            else:
+                try:
+                    newMeme.seek(int(newMeme.n_frames / 2))
+
+                except:
+                    pass
+
+        newMeme = newMeme.resize((150, 150))
+
+        originalArray = asarray(newMeme)
+        if not os.path.exists(f"data/{message.guild.id}/images"):
+            os.makedirs(f"data/{message.guild.id}/images")
+
         memes = os.listdir(f"data/{message.guild.id}/images/")
 
         count = 0
@@ -464,30 +486,18 @@ async def on_message(message):
                 )
                 err /= float(originalArray.shape[0] * originalArray.shape[1])
                 if err < 14000:
-                    print(err)
-                    print("stolen!")
+                    stolen = True
                     try:
-                        f = await aiofiles.open(
-                            f"data/{message.guild.id}/messages.data"
-                        )
-                        messages = await f.read()
-                        await f.close()
-                        messages = messages.splitlines()
-                        channelID, messageID = messages[count + 1].split("/")
+                        channelID, messageID = i.split(".")[0].split("-")
                         channel = message.guild.get_channel(int(channelID))
                         originalMessage = await channel.fetch_message(int(messageID))
                         em = discord.Embed(
                             title="Meme Stolen",
-                            description="Stop right there thief! This meme has been sent before!",
+                            description=f"[Sent {arrow.arrow.Arrow.fromdatetime(originalMessage.created_at).humanize(arrow.utcnow())} by]({originalMessage.jump_url})  <@{originalMessage.author.id}>",
                             colour=16711680,
-                        )
-                        em.add_field(
-                            name="Original Message",
-                            value=f"[Sent {arrow.arrow.Arrow.fromdatetime(originalMessage.created_at).humanize(arrow.utcnow())}]({originalMessage.jump_url})",
                         )
                         await message.channel.send(embed=em)
 
-                        stolen = True
                     except:
                         pass
 
@@ -496,150 +506,114 @@ async def on_message(message):
             count += 1
 
         if not stolen:
-            f = await aiofiles.open(f"data/{message.guild.id}/messages.data", "a+")
-            await f.write("\n" + f"{message.channel.id}/{message.id}")
-            await f.close()
+            print(
+                "{} ({}) > {} ({}): Meme Detected".format(
+                    message.guild.name,
+                    message.guild.id,
+                    message.author.name,
+                    message.author.id,
+                )
+            )  # Log that a meme has been detected
+
             try:
-                os.system(f"mkdir data/{message.guild.id}/images/")
+                extension = message.attachments[0].filename.split(".")[1]
+
+            except:
+                extension = memeUrl.split(".")[-1].split("?")[0]
+
+            try:
+                newMeme.save(
+                    f"data/{message.guild.id}/images/{message.channel.id}-{message.id}.png"
+                )
+
+            except:
+                newMeme.save(
+                    f"data/{message.guild.id}/images/{message.channel.id}-{message.id}.{extension}"
+                )
+
+        else:
+            print(
+                "{} ({}) > {} ({}): Stolen Meme Detected".format(
+                    message.guild.name,
+                    message.guild.id,
+                    message.author.name,
+                    message.author.id,
+                )
+            )  # Log that a stolen meme has been detected
+
+        if not stolen:
+            try:
+                # Load leaderboard into a dictionary
+                f = await aiofiles.open(f"data/{message.guild.id}/leaderboard.data")
+                content = await f.read()
+                leaderboard = json.loads(content)
+                await f.close()
+
+            except:
+                f = await aiofiles.open(
+                    f"data/{message.guild.id}/leaderboard.data", "w+"
+                )
+                await f.write("{}")
+                await f.close()
+                leaderboard = {}
+
+            # Try to add 1 to author's score
+            try:
+                leaderboard[str(message.author.id)] = str(
+                    int(leaderboard[str(message.author.id)]) + 1
+                )
+
+            # If failed, author is not in leaderboard, add a new entry
+            except:
+                leaderboard[str(message.author.id)] = "1"
+
+            # Dump dictionary to leaderboard.data
+            f = await aiofiles.open(f"data/{message.guild.id}/leaderboard.data", "w")
+            toWrite = json.dumps(leaderboard)
+            await f.write(toWrite)
+            await f.close()
+
+            # Load dictionary into a 2d list (for ordering - dictionaries in Python are not ordered)
+            positions = []
+            for i in leaderboard:
+                positions.append([int(leaderboard[i]), i])
+
+            # Sort leaderboard
+            positions.sort()
+            content = "***Leaderboard***"
+
+            for i in range(5):  # Run through top 5 scores
+                if (
+                    i == 0
+                ):  # Since list is being accessed from the end, 1 (-1) is the first index, not 0
+                    continue
+                try:  # Try to add score to content
+                    content = (
+                        content
+                        + "\n"
+                        + str(i)
+                        + " - "
+                        + f"<@{positions[-i][1]}>"
+                        + " - "
+                        + str(positions[-i][0])
+                        + " memes"
+                    )
+                except:  # If failed, there are less than 5 entries, break the loop
+                    break
+
+            try:
+                f = await aiofiles.open(f"data/{message.guild.id}/ids.data")
+                toSplit = await f.read()
+                channelID, messageID = toSplit.splitlines()
+                await f.close()
+
+                # Edit the leaderboard to the new scores
+                channel = client.get_channel(int(channelID))
+                msg = await channel.fetch_message(int(messageID))
+                await msg.edit(content=content)
+
             except:
                 pass
-
-            newMeme.save(f"data/{message.guild.id}/images/{len(memes)}.png")
-
-        """try:
-            f = await aiofiles.open(f"data/{message.guild.id}/memes.data")
-            memes = await f.read()
-            memes = memes.splitlines()  # Get a list of past meme hashes
-            await f.close()
-
-        # If file doesn't exist
-        except:
-            # Create file
-            f = await aiofiles.open(f"data/{message.guild.id}/memes.data", "w+")
-            await f.close()
-            # Set memes to blank
-            memes = []
-
-        for x in memes:  # Run through the meme hashes
-            if hash in x:  # If message's meme hash is in the file
-                delete = False
-                try:
-                    f = await aiofiles.open(f"data/{message.guild.id}/delete.data")
-                    contents = await f.read()
-                    await f.close()
-
-                    if "1" in contents:
-                        delete = True
-
-                except:
-                    pass
-
-                if delete == False:
-                    em = discord.Embed(
-                        title="Repost Detected!",
-                        description="This meme has already been sent, thief.",
-                        colour=16711680,
-                    )  # Define an angry embed (in red of course)
-                    em.add_field(
-                        name="URL", value=memeUrl
-                    )  # Attach url for the meme (in case of spam)
-
-                    for i in memes:  # Run through all the meme hashes
-                        if hash in i:  # If hash is current meme
-                            i = i.replace(f"{hash} - ", "")  # Get original author ID
-                            em.add_field(
-                                name="Original Author", value=f"<@{i}>"
-                            )  # Add author mention to embed
-
-                    await message.channel.send(embed=em)  # Send embed
-                    return  # Return to prevent leaderboard changes
-
-                else:
-                    await message.delete(delay=1.0)
-
-        try:
-            # Write meme hash to memes.data
-            f = await aiofiles.open(f"data/{message.guild.id}/memes.data", "a")
-            await f.write(f"\n{hash} - {message.author.id}")
-            await f.close()
-
-        except:
-            # Write meme hash to memes.data
-            f = await aiofiles.open(f"data/{message.guild.id}/memes.data", "w+")
-            await f.write(f"\n{hash} - {message.author.id}")
-            await f.close()"""
-
-        try:
-            # Load leaderboard into a dictionary
-            f = await aiofiles.open(f"data/{message.guild.id}/leaderboard.data")
-            content = await f.read()
-            leaderboard = json.loads(content)
-            await f.close()
-
-        except:
-            f = await aiofiles.open(f"data/{message.guild.id}/leaderboard.data", "w+")
-            await f.write("{}")
-            await f.close()
-            leaderboard = {}
-
-        # Try to add 1 to author's score
-        try:
-            leaderboard[str(message.author.id)] = str(
-                int(leaderboard[str(message.author.id)]) + 1
-            )
-
-        # If failed, author is not in leaderboard, add a new entry
-        except:
-            leaderboard[str(message.author.id)] = "1"
-
-        # Dump dictionary to leaderboard.data
-        f = await aiofiles.open(f"data/{message.guild.id}/leaderboard.data", "w")
-        toWrite = json.dumps(leaderboard)
-        print(toWrite)
-        await f.write(toWrite)
-        await f.close()
-
-        # Load dictionary into a 2d list (for ordering - dictionaries in Python are not ordered)
-        positions = []
-        for i in leaderboard:
-            positions.append([int(leaderboard[i]), i])
-
-        # Sort leaderboard
-        positions.sort()
-        content = "***Leaderboard***"
-
-        for i in range(5):  # Run through top 5 scores
-            if (
-                i == 0
-            ):  # Since list is being accessed from the end, 1 (-1) is the first index, not 0
-                continue
-            try:  # Try to add score to content
-                content = (
-                    content
-                    + "\n"
-                    + str(i)
-                    + " - "
-                    + f"<@{positions[-i][1]}>"
-                    + " - "
-                    + str(positions[-i][0])
-                    + " memes"
-                )
-            except:  # If failed, there are less than 5 entries, break the loop
-                break
-
-        try:
-            f = await aiofiles.open(f"data/{message.guild.id}/ids.data")
-            toSplit = await f.read()
-            channelID, messageID = toSplit.splitlines()
-            await f.close()
-
-            # Edit the leaderboard to the new scores
-            channel = client.get_channel(int(channelID))
-            msg = await channel.fetch_message(int(messageID))
-            await msg.edit(content=content)
-
-        except:
-            pass
 
     if message.content.startswith(prefix):  # If message is command
         try:
