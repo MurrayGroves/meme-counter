@@ -18,6 +18,7 @@ import math
 import numpy
 import io
 import os
+import arrow
 
 # Async stuff
 import asyncio
@@ -342,17 +343,17 @@ def pretty_date(time=False):
     pretty string like 'an hour ago', 'Yesterday', '3 months ago',
     'just now', etc
     """
-    from datetime import datetime
+    from datetime import datetime, timedelta
 
-    now = datetime.now()
+    now = datetime.now() + timedelta(hours=-2)
     if type(time) is int:
         diff = now - datetime.fromtimestamp(time)
     elif isinstance(time, datetime):
         diff = now - time
     elif not time:
         diff = now - now
-    second_diff = diff.seconds
     day_diff = diff.days
+    second_diff = diff.seconds
 
     if day_diff < 0:
         return ""
@@ -404,13 +405,6 @@ async def on_message(message):
 
         newMeme = Image.open(fd).resize((150, 150))
 
-        """loop = asyncio.get_event_loop()
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
-        hash = await loop.run_in_executor(
-            executor, getHash, contents
-        )  # Hash the raw attachment bytes (weird but I mean it works, if someone really wanted to get around the detection, it would be really easy though)
-        print(str(hash))"""
-
     elif "https://" in message.content:  # If the message contains a link
         meme = True  # Define message as meme
         loop = asyncio.get_event_loop()
@@ -432,11 +426,6 @@ async def on_message(message):
         fd = io.BytesIO(contents)
         newMeme = Image.open(fd).resize((150, 150))
 
-        """hash = await loop.run_in_executor(
-            executor, getHash, contents
-        )  # Hash the raw attachment bytes (weird but I mean it works, if someone really wanted to get around the detection, it would be really easy though)
-        print(hash)"""
-
     if meme:  # If message is a meme
         print(
             "{} ({}) > {} ({}): Meme Detected".format(
@@ -447,62 +436,67 @@ async def on_message(message):
             )
         )  # Log that a meme has been detected
 
+        newMeme.putalpha(255)
         originalArray = asarray(newMeme)
+        try:
+            os.system(f"mkdir data\{message.guild.id}\images")
+        except:
+            pass
         memes = os.listdir(f"data/{message.guild.id}/images/")
 
         count = 0
         stolen = False
         for i in memes:
-            try:
-                f = await aiofiles.open(f"data/{message.guild.id}/images/{i}", "rb")
-                fd = io.BytesIO()
-                fd.write(await f.read())
-                curMeme = Image.open(fd)
-                await f.close()
+            f = await aiofiles.open(f"data/{message.guild.id}/images/{i}", "rb")
+            fd = io.BytesIO()
+            fd.write(await f.read())
+            curMeme = Image.open(fd)
+            await f.close()
 
-                curMemeArray = asarray(curMeme)
-                err = numpy.sum(
-                    (originalArray.astype("float") - curMemeArray.astype("float")) ** 2
-                )
-                err /= float(originalArray.shape[0] * originalArray.shape[1])
+            curMemeArray = asarray(curMeme)
+            err = numpy.sum(
+                (originalArray.astype("float") - curMemeArray.astype("float")) ** 2
+            )
+            err /= float(originalArray.shape[0] * originalArray.shape[1])
+            if err < 14000:
                 print(err)
-                count += 1
-                if err < 20000:
-                    print("stolen!")
-                    try:
-                        f = await aiofiles.open(
-                            f"data/{message.guild.id}/messages.data"
-                        )
-                        messages = await f.read()
-                        await f.close()
-                        messages = messages.splitlines()
-                        channelID, messageID = messages[count].split("/")
-                        print(channelID, messageID)
-                        channel = message.guild.get_channel(int(channelID))
-                        originalMessage = await channel.fetch_message(int(messageID))
-                        em = discord.Embed(
-                            title="Meme Stolen",
-                            description="Stop right there thief! This meme has been sent before!",
-                            colour=16711680,
-                        )
-                        em.add_field(
-                            name="Original Message",
-                            value=f"[Sent {pretty_date(originalMessage.created_at)}]({originalMessage.jump_url})",
-                        )
-                        await message.channel.send(embed=em)
-                    except Exception as e:
-                        print(e)
-                    stolen = True
-                    break
+                print("stolen!")
+                try:
+                    f = await aiofiles.open(f"data/{message.guild.id}/messages.data")
+                    messages = await f.read()
+                    await f.close()
+                    messages = messages.splitlines()
+                    channelID, messageID = messages[count + 1].split("/")
+                    channel = message.guild.get_channel(int(channelID))
+                    originalMessage = await channel.fetch_message(int(messageID))
+                    em = discord.Embed(
+                        title="Meme Stolen",
+                        description="Stop right there thief! This meme has been sent before!",
+                        colour=16711680,
+                    )
+                    em.add_field(
+                        name="Original Message",
+                        value=f"[Sent {arrow.arrow.Arrow.fromdatetime(originalMessage.created_at).humanize(arrow.utcnow())}]({originalMessage.jump_url})",
+                    )
+                    await message.channel.send(embed=em)
 
-            except:
-                pass
+                    stolen = True
+                except:
+                    pass
+
+                break
+            count += 1
 
         if not stolen:
             f = await aiofiles.open(f"data/{message.guild.id}/messages.data", "a+")
             await f.write("\n" + f"{message.channel.id}/{message.id}")
             await f.close()
-            newMeme.save(f"data/{message.guild.id}/images/{count+1}.png")
+            try:
+                os.system(f"mkdir data/{message.guild.id}/images/")
+            except:
+                pass
+
+            newMeme.save(f"data/{message.guild.id}/images/{len(memes)}.png")
 
         """try:
             f = await aiofiles.open(f"data/{message.guild.id}/memes.data")
