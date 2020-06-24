@@ -439,7 +439,11 @@ async def on_message(message):
         newMeme.putalpha(255)
         originalArray = asarray(newMeme)
         try:
-            os.system(f"mkdir data\{message.guild.id}\images")
+            if sys.platform == "linux" or sys.platform == "linux2":
+                os.system(f"mkdir data/{message.guild.id}/images")
+
+            else:
+                os.system(f"mkdir data\{message.guild.id}\images")
         except:
             pass
         memes = os.listdir(f"data/{message.guild.id}/images/")
@@ -447,44 +451,49 @@ async def on_message(message):
         count = 0
         stolen = False
         for i in memes:
-            f = await aiofiles.open(f"data/{message.guild.id}/images/{i}", "rb")
-            fd = io.BytesIO()
-            fd.write(await f.read())
-            curMeme = Image.open(fd)
-            await f.close()
+            try:
+                f = await aiofiles.open(f"data/{message.guild.id}/images/{i}", "rb")
+                fd = io.BytesIO()
+                fd.write(await f.read())
+                curMeme = Image.open(fd)
+                await f.close()
 
-            curMemeArray = asarray(curMeme)
-            err = numpy.sum(
-                (originalArray.astype("float") - curMemeArray.astype("float")) ** 2
-            )
-            err /= float(originalArray.shape[0] * originalArray.shape[1])
-            if err < 14000:
-                print(err)
-                print("stolen!")
-                try:
-                    f = await aiofiles.open(f"data/{message.guild.id}/messages.data")
-                    messages = await f.read()
-                    await f.close()
-                    messages = messages.splitlines()
-                    channelID, messageID = messages[count + 1].split("/")
-                    channel = message.guild.get_channel(int(channelID))
-                    originalMessage = await channel.fetch_message(int(messageID))
-                    em = discord.Embed(
-                        title="Meme Stolen",
-                        description="Stop right there thief! This meme has been sent before!",
-                        colour=16711680,
-                    )
-                    em.add_field(
-                        name="Original Message",
-                        value=f"[Sent {arrow.arrow.Arrow.fromdatetime(originalMessage.created_at).humanize(arrow.utcnow())}]({originalMessage.jump_url})",
-                    )
-                    await message.channel.send(embed=em)
+                curMemeArray = asarray(curMeme)
+                err = numpy.sum(
+                    (originalArray.astype("float") - curMemeArray.astype("float")) ** 2
+                )
+                err /= float(originalArray.shape[0] * originalArray.shape[1])
+                if err < 14000:
+                    print(err)
+                    print("stolen!")
+                    try:
+                        f = await aiofiles.open(
+                            f"data/{message.guild.id}/messages.data"
+                        )
+                        messages = await f.read()
+                        await f.close()
+                        messages = messages.splitlines()
+                        channelID, messageID = messages[count + 1].split("/")
+                        channel = message.guild.get_channel(int(channelID))
+                        originalMessage = await channel.fetch_message(int(messageID))
+                        em = discord.Embed(
+                            title="Meme Stolen",
+                            description="Stop right there thief! This meme has been sent before!",
+                            colour=16711680,
+                        )
+                        em.add_field(
+                            name="Original Message",
+                            value=f"[Sent {arrow.arrow.Arrow.fromdatetime(originalMessage.created_at).humanize(arrow.utcnow())}]({originalMessage.jump_url})",
+                        )
+                        await message.channel.send(embed=em)
 
-                    stolen = True
-                except:
-                    pass
+                        stolen = True
+                    except:
+                        pass
 
-                break
+                    break
+            except:
+                pass
             count += 1
 
         if not stolen:
