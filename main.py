@@ -4,6 +4,9 @@ import discord
 from PIL import Image
 from numpy import asarray
 import numpy
+from skimage.metrics import structural_similarity as compare_ssim
+import argparse
+import imutils
 import cv2
 import urllib.request
 
@@ -177,7 +180,7 @@ async def cmd_info(message):
 # Get Invite
 async def cmd_invite(message):
     await message.channel.send(
-        "https://discordapp.com/oauth2/authorize?client_id=705916758371991642&scope=bot&permissions=67136512"
+        "https://discordapp.com/oauth2/authorize?client_id=705916758371991642&scope=bot&permissions=26640"
     )
 
 
@@ -191,12 +194,7 @@ async def cmd_help(message):
     em.add_field(name=f"{prefix}score", value="See your score", inline=False)
     em.add_field(
         name=f"{prefix}set_leaderboard",
-        value="Set the leaderboard channel, it is advised that this channel is read only so that the leaderboard message is always visible",
-        inline=False,
-    )
-    em.add_field(
-        name=f"{prefix}toggle_deletion",
-        value="Toggle whether the bot deletes reposts",
+        value="Override the leaderboard channel to current channel",
         inline=False,
     )
     em.add_field(
@@ -303,6 +301,27 @@ async def cmd_set_leaderboard(message):
 
 @client.event
 async def on_guild_join(guild):
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(send_messages=False),
+        guild.me: discord.PermissionOverwrite(send_messages=True),
+    }
+    leaderboardChannel = await guild.create_text_channel(
+        "meme-leaderboard", overwrites=overwrites
+    )
+
+    leaderboardMessage = await leaderboardChannel.send("***Leaderboard***")
+    try:
+        # Create guild's data folder
+        subprocess.Popen(f'mkdir "data/{guild.id}"', shell=True)
+
+    except:
+        pass
+
+    await asyncio.sleep(0.5)
+    f = await aiofiles.open(f"data/{guild.id}/ids.data", "w+")
+    await f.write(f"{leaderboardChannel.id}\n{leaderboardMessage.id}")
+    await f.close()
+
     # DM me when the bot joins a new server
     me = client.get_user(245994206965792780)
     if me.dm_channel == None:
@@ -435,32 +454,17 @@ async def on_message(message):
 
     if meme:  # If message is a meme
         try:
-            if (
-                ".png" in message.attachments[0].filename
-                or ".jpg" in message.attachments[0].filename
-            ):
-                newMeme.putalpha(255)
+            newMeme.putalpha(255)
 
-            else:
-                try:
-                    newMeme.seek(int(newMeme.n_frames / 2))
+        except Exception as e:
+            print(e)
+            pass
 
-                except:
-                    pass
+        try:
+            newMeme.seek(int(newMeme.n_frames / 2))
 
         except:
-            if (
-                ".png" in memeUrl.split(".")[-1].split("?")[0]
-                or ".jpg" in memeUrl.split(".")[-1].split("?")[0]
-            ):
-                newMeme.putalpha(255)
-
-            else:
-                try:
-                    newMeme.seek(int(newMeme.n_frames / 2))
-
-                except:
-                    pass
+            pass
 
         newMeme = newMeme.resize((150, 150))
 
@@ -481,11 +485,20 @@ async def on_message(message):
                 await f.close()
 
                 curMemeArray = asarray(curMeme)
-                err = numpy.sum(
-                    (originalArray.astype("float") - curMemeArray.astype("float")) ** 2
-                )
-                err /= float(originalArray.shape[0] * originalArray.shape[1])
-                if err < 14000:
+                # err = numpy.sum(
+                #    (originalArray.astype("float") - curMemeArray.astype("float")) ** 2
+                # )
+
+                # err /= float(originalArray.shape[0] * originalArray.shape[1])
+
+                grayA = cv2.cvtColor(originalArray, cv2.COLOR_RGB2GRAY)
+                grayB = cv2.cvtColor(curMemeArray, cv2.COLOR_RGB2GRAY)
+
+                (score, diff) = compare_ssim(grayA, grayB, full=True)
+                diff = (diff * 255).astype("uint8")
+                score *= 100
+
+                if score > 25:
                     stolen = True
                     try:
                         channelID, messageID = i.split(".")[0].split("-")
@@ -501,7 +514,8 @@ async def on_message(message):
                     except:
                         pass
 
-            except:
+            except Exception as e:
+                print(e)
                 pass
             count += 1
 
