@@ -149,6 +149,57 @@ async def cmd_toggle_deletion(message):
         await message.channel.send(embed=em)
 
 
+# Set percentage threshold for message to be marked as repost
+async def cmd_set_threshold(message):
+    # Check if message author has manage channels permission
+    if not (
+        message.author.guild_permissions.administrator
+        or message.author.guild_permissions.manage_channels
+    ):
+        em = discord.Embed(
+            title="Permissions Error",
+            description="You need the manage channels permission to run this command",
+            colour=16711680,
+        )
+        await message.channel.send(embed=em)
+        return
+
+    threshold = message.content.replace(f"{prefix}set_threshold ", "", 1)
+
+    valid = True
+    try:
+        if int(threshold) > 100 or int(threshold) < 0:
+            valid = False
+
+    except:
+        valid = False
+
+    if not valid:
+        em = discord.Embed(
+            title="Error",
+            description="The threshold must be a number between 0 and 100, "
+            "representing the required percentage similarity "
+            "between two images for them to be considered the "
+            "same. Default is 25",
+            colour=16711680,
+        )
+
+        await message.channel.send(embed=em)
+        return
+
+    f = await aiofiles.open(f"data/{message.guild.id}/threshold.data", "w+")
+    await f.write(threshold)
+    await f.close()
+
+    em = discord.Embed(
+        title="Set Threshold",
+        description=f"Threshold set to {threshold}",
+        colour=random.randint(0, 16777215),
+    )
+
+    await message.channel.send(embed=em)
+
+
 # Info command
 async def cmd_info(message):
     em = discord.Embed(title="Info", colour=random.randint(0, 16777215))
@@ -498,7 +549,15 @@ async def on_message(message):
                 diff = (diff * 255).astype("uint8")
                 score *= 100
 
-                if score > 25:
+                try:
+                    f = await aiofiles.open(f"data/{message.guild.id}/threshold.data")
+                    threshold = int(await f.read())
+                    await f.close()
+
+                except:
+                    threshold = 25
+
+                if score > threshold:
                     stolen = True
                     try:
                         channelID, messageID = i.split(".")[0].split("-")
