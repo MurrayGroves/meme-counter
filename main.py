@@ -244,6 +244,14 @@ async def cmd_help(message):
     )
     em.add_field(name=f"{prefix}score", value="See your score", inline=False)
     em.add_field(
+        name=f"{prefix}set_threshold",
+        value="Change what percentage "
+        "similarity counts as a "
+        "repost, should be a "
+        "number between 0 and 100",
+        inline=False,
+    )
+    em.add_field(
         name=f"{prefix}set_leaderboard",
         value="Override the leaderboard channel to current channel",
         inline=False,
@@ -433,6 +441,9 @@ def convertToImage(message, extension):
 # Run upon receiving message
 @client.event
 async def on_message(message):
+    if message.guild.id == 110373943822540800:
+        return
+
     global prefix
 
     # Ignore messages from the bot (prevents looping by malicious parties)
