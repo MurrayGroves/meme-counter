@@ -518,8 +518,7 @@ async def on_message(message):
         try:
             newMeme.putalpha(255)
 
-        except Exception as e:
-            print(e)
+        except:
             pass
 
         try:
@@ -584,8 +583,7 @@ async def on_message(message):
                     except:
                         pass
 
-            except Exception as e:
-                print(e)
+            except:
                 pass
             count += 1
 
