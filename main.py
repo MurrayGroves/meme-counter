@@ -535,6 +535,24 @@ async def on_message(message):
 
         memes = os.listdir(f"data/{message.guild.id}/images/")
 
+        # Create a list of all the colours in the image
+        colourList = []
+        for x in originalArray:
+            for y in x:
+                rgb = y[0]
+                rgb = (rgb << 8) + y[1]
+                rgb = (rgb << 8) + y[2]
+                colourList.append(rgb)
+
+        # Flatten into 1D array
+        colourList = numpy.array(colourList).flatten()
+        # Get occurrences of each colour
+        counts = numpy.bincount(colourList)
+        # Find the most common colour
+        mostCommonOriginal = numpy.argmax(counts)
+        # Get how many occurrences there are of the most common colour
+        numOfMostCommonOriginal = counts[mostCommonOriginal]
+
         count = 0
         stolen = False
         for i in memes:
@@ -546,17 +564,47 @@ async def on_message(message):
                 await f.close()
 
                 curMemeArray = asarray(curMeme)
-                # err = numpy.sum(
-                #    (originalArray.astype("float") - curMemeArray.astype("float")) ** 2
-                # )
 
-                # err /= float(originalArray.shape[0] * originalArray.shape[1])
+                # Create a list of all the colours in the image
+                colourList = []
+                for x in curMemeArray:
+                    for y in x:
+                        rgb = y[0]
+                        rgb = (rgb << 8) + y[1]
+                        rgb = (rgb << 8) + y[2]
+                        colourList.append(rgb)
+
+                # Flatten into 1D array
+                colourList = numpy.array(colourList).flatten()
+
+                # Get number of occurrences of each colour
+                counts = numpy.bincount(colourList)
+                # Get most common colour
+                mostCommonCurrent = numpy.argmax(counts)
+                # Get number of occurrences of most common colour
+                numOfMostCommonCurrent = counts[mostCommonCurrent]
+
+                # Get percentage of image that is background
+                originalBackgroundPercentage = numOfMostCommonOriginal / 22500
+                currentBackgroundPercentage = numOfMostCommonCurrent / 22500
+
+                # Get percentage of both images that is background
+                backgroundPercentage = (
+                    originalBackgroundPercentage + currentBackgroundPercentage
+                ) / 2
+
+                # Get the similarity between the two background colours
+                backgroundDiff = mostCommonCurrent - mostCommonOriginal
+                backgroundSimilarity = (16777215 - backgroundDiff) / 16777215
+
+                # Figure out an offset to be applied to the similarity to reduce the effect of solid colour backgrounds on similarity
+                similarityOffset = backgroundSimilarity * backgroundPercentage
 
                 grayA = cv2.cvtColor(originalArray, cv2.COLOR_RGB2GRAY)
                 grayB = cv2.cvtColor(curMemeArray, cv2.COLOR_RGB2GRAY)
 
                 (score, diff) = compare_ssim(grayA, grayB, full=True)
-                diff = (diff * 255).astype("uint8")
+                score -= abs(similarityOffset)
                 score *= 100
 
                 try:
@@ -568,6 +616,8 @@ async def on_message(message):
                     threshold = 25
 
                 if score > threshold:
+                    print("Score " + str(score))
+                    print("Offset " + str(similarityOffset))
                     stolen = True
                     try:
                         channelID, messageID = i.split(".")[0].split("-")
@@ -583,7 +633,8 @@ async def on_message(message):
                     except:
                         pass
 
-            except:
+            except Exception as e:
+                print(e)
                 pass
             count += 1
 

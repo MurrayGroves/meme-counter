@@ -1,3 +1,4 @@
 import os
+
 while True:
-	os.system("py main.py")
+    os.system("python3.8 -u main.py")
