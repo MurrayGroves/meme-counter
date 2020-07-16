@@ -273,8 +273,9 @@ async def cmd_ping(message):
 async def cmd_score(message):
     # Asynchronously load guilds leaderboard
     f = await aiofiles.open(f"data/{message.guild.id}/leaderboard.data")
-    leaderboard = await json.load(f)
+    content = await f.read()
     await f.close()
+    leaderboard = json.loads(content)
 
     # Get user's score
     score = leaderboard[str(message.author.id)]
@@ -435,7 +436,7 @@ def convertToImage(message, extension):
 
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     newMeme = Image.fromarray(frame)
-    return newMeme
+    return newMeme.resize((150, 150))
 
 
 # Run upon receiving message
@@ -457,14 +458,32 @@ async def on_message(message):
             0
         ].url  # Assume message has only one attachment and get it's CDN url
 
-        # await message.attachments[0].save(f"data/{message.guild.id}/temp") #Save the attachment to the temp file
+        # await message.attachments[0].save(
+        #    f"data/{message.guild.id}/temp.gif"
+        # )  # Save the attachment to the temp file
+
+        # imageObject = Image.open(f"data/{message.guild.id}/temp.gif")
+
+        # Display individual frames from the loaded animated GIF file
+
         fd = io.BytesIO()
         await message.attachments[0].save(fd)
         # Read raw bytes from the temp file (the attachment)
-        # f = await aiofiles.open(f"data/{message.guild.id}/temp","rb")
+        # f = open(f"data/{message.guild.id}/temp.gif", "rb")
 
         try:
-            newMeme = Image.open(fd)
+            imageObject = Image.open(fd)
+
+            if imageObject.is_animated:
+                mid = imageObject.n_frames // 2
+                for frame in range(0, imageObject.n_frames):
+                    imageObject.seek(frame)
+                    imageObject.convert("RGBA")
+                    if frame == mid:
+                        newMeme = imageObject.resize((150, 150)).convert("RGBA")
+
+            else:
+                newMeme = imageObject.resize((150, 150))
 
         except:
             extension = message.attachments[0].filename.split(".")[1]
@@ -515,30 +534,25 @@ async def on_message(message):
             )
 
     if meme:  # If message is a meme
-        try:
-            newMeme.putalpha(255)
+        originalArray = numpy.asarray(newMeme)
 
-        except:
-            pass
-
-        try:
-            newMeme.seek(int(newMeme.n_frames / 2))
-
-        except:
-            pass
-
-        newMeme = newMeme.resize((150, 150))
-
-        originalArray = asarray(newMeme)
         if not os.path.exists(f"data/{message.guild.id}/images"):
             os.makedirs(f"data/{message.guild.id}/images")
 
         memes = os.listdir(f"data/{message.guild.id}/images/")
 
+        try:
+            newMeme.putalpha(255)
+            print("Alphad")
+
+        except:
+            pass
+
         # Create a list of all the colours in the image
         colourList = []
         for x in originalArray:
             for y in x:
+                print(y)
                 rgb = y[0]
                 rgb = (rgb << 8) + y[1]
                 rgb = (rgb << 8) + y[2]
