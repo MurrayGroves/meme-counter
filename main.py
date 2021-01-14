@@ -1,17 +1,10 @@
 import discord
 
-# Image dupe checking
+# Image handling
 from PIL import Image
-from numpy import asarray
-import numpy
-from skimage.metrics import structural_similarity as compare_ssim
-import argparse
-import imutils
-import cv2
-import urllib.request
+import numpy as np
 
 # Misc
-import platform
 import subprocess
 import sys
 import json
@@ -19,10 +12,7 @@ import random
 import re
 import time
 import math
-import numpy
-import io
 import os
-import arrow
 
 # Async stuff
 import asyncio
@@ -60,6 +50,12 @@ prefix = ","
 # Define Discord client object
 global client
 client = discord.Client()
+
+import logging.config
+logging.config.dictConfig({
+    'version': 1,
+    'disable_existing_loggers': True,
+})
 
 # Perform background tasks asynchronously
 async def backgroundLoop():
@@ -412,33 +408,6 @@ async def on_ready():
 def regexSearch(term, myString):
     return re.search(term, myString).group("url")
 
-
-# Function to convert middle frame of video to Image object
-def convertToImage(message, extension):
-    vid = cv2.VideoCapture(f"data/{message.guild.id}/temp.{extension}")
-
-    currentFrame = 0
-    while True:
-        ret, frame = vid.read()
-
-        if ret:
-            currentFrame += 1
-
-        else:
-            vid.release()
-            break
-
-    vid = cv2.VideoCapture(f"data/{message.guild.id}/temp.{extension}")
-    for i in range(int(currentFrame / 2)):
-        ret, frame = vid.read()
-
-    vid.release()
-
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    newMeme = Image.fromarray(frame)
-    return newMeme.resize((150, 150))
-
-
 # Run upon receiving message
 @client.event
 async def on_message(message):
@@ -454,49 +423,15 @@ async def on_message(message):
     meme = False
     if len(message.attachments) > 0:  # If the message has attachments
         meme = True  # Define message as meme
-        memeUrl = message.attachments[
-            0
-        ].url  # Assume message has only one attachment and get it's CDN url
 
-        # await message.attachments[0].save(
-        #    f"data/{message.guild.id}/temp.gif"
-        # )  # Save the attachment to the temp file
+        curFilePath = f"{message.id}{os.path.splitext(message.attachments[0].filename)[1]}"
+        f = open(f"images/{curFilePath}", "wb+")
+        await message.attachments[0].save(f)
+        f.close()
 
-        # imageObject = Image.open(f"data/{message.guild.id}/temp.gif")
-
-        # Display individual frames from the loaded animated GIF file
-
-        fd = io.BytesIO()
-        await message.attachments[0].save(fd)
-        # Read raw bytes from the temp file (the attachment)
-        # f = open(f"data/{message.guild.id}/temp.gif", "rb")
-
-        try:
-            imageObject = Image.open(fd)
-
-            if imageObject.is_animated:
-                mid = imageObject.n_frames // 2
-                for frame in range(0, imageObject.n_frames):
-                    imageObject.seek(frame)
-                    imageObject.convert("RGBA")
-                    if frame == mid:
-                        newMeme = imageObject.resize((150, 150)).convert("RGBA")
-
-            else:
-                newMeme = imageObject.resize((150, 150))
-
-        except:
-            extension = message.attachments[0].filename.split(".")[1]
-
-            f = await aiofiles.open(f"data/{message.guild.id}/temp.{extension}", "wb")
-            await f.write(fd.getbuffer())
-            await f.close()
-
-            loop = asyncio.get_event_loop()
-            executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
-            newMeme = await loop.run_in_executor(
-                executor, convertToImage, message, extension
-            )
+        im = Image.open(f"images/{curFilePath}")
+        im_resize = im.resize((500, 500))
+        im_resize.save(f"images/{curFilePath}")
 
     elif "https://" in message.content:  # If the message contains a link
         meme = True  # Define message as meme
@@ -516,179 +451,25 @@ async def on_message(message):
                         break
                     contents += chunk
 
-        fd = io.BytesIO(contents)
-        try:
-            newMeme = Image.open(fd)
-
-        except:
-            extension = memeUrl.split(".")[-1].split("?")[0]
-
-            f = await aiofiles.open(f"data/{message.guild.id}/temp.{extension}", "wb")
-            await f.write(fd.getbuffer())
-            await f.close()
-
-            loop = asyncio.get_event_loop()
-            executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
-            newMeme = await loop.run_in_executor(
-                executor, convertToImage, message, extension
-            )
 
     if meme:  # If message is a meme
-        originalArray = numpy.asarray(newMeme)
 
-        if not os.path.exists(f"data/{message.guild.id}/images"):
-            os.makedirs(f"data/{message.guild.id}/images")
+        from imagededup.methods import CNN
+        phasher = CNN()
+        encodings = phasher.encode_images(image_dir=f'images')
+        duplicates = phasher.find_duplicates(encoding_map=encodings, scores=True, min_similarity_threshold=0.8)
 
-        memes = os.listdir(f"data/{message.guild.id}/images/")
-
-        try:
-            newMeme.putalpha(255)
-            print("Alphad")
-
-        except:
-            pass
-
-        # Create a list of all the colours in the image
-        colourList = []
-        for x in originalArray:
-            for y in x:
-                print(y)
-                rgb = y[0]
-                rgb = (rgb << 8) + y[1]
-                rgb = (rgb << 8) + y[2]
-                colourList.append(rgb)
-
-        # Flatten into 1D array
-        colourList = numpy.array(colourList).flatten()
-        # Get occurrences of each colour
-        counts = numpy.bincount(colourList)
-        # Find the most common colour
-        mostCommonOriginal = numpy.argmax(counts)
-        # Get how many occurrences there are of the most common colour
-        numOfMostCommonOriginal = counts[mostCommonOriginal]
-
-        count = 0
-        stolen = False
-        for i in memes:
-            try:
-                f = await aiofiles.open(f"data/{message.guild.id}/images/{i}", "rb")
-                fd = io.BytesIO()
-                fd.write(await f.read())
-                curMeme = Image.open(fd)
-                await f.close()
-
-                curMemeArray = asarray(curMeme)
-
-                # Create a list of all the colours in the image
-                colourList = []
-                for x in curMemeArray:
-                    for y in x:
-                        rgb = y[0]
-                        rgb = (rgb << 8) + y[1]
-                        rgb = (rgb << 8) + y[2]
-                        colourList.append(rgb)
-
-                # Flatten into 1D array
-                colourList = numpy.array(colourList).flatten()
-
-                # Get number of occurrences of each colour
-                counts = numpy.bincount(colourList)
-                # Get most common colour
-                mostCommonCurrent = numpy.argmax(counts)
-                # Get number of occurrences of most common colour
-                numOfMostCommonCurrent = counts[mostCommonCurrent]
-
-                # Get percentage of image that is background
-                originalBackgroundPercentage = numOfMostCommonOriginal / 22500
-                currentBackgroundPercentage = numOfMostCommonCurrent / 22500
-
-                # Get percentage of both images that is background
-                backgroundPercentage = (
-                    originalBackgroundPercentage + currentBackgroundPercentage
-                ) / 2
-
-                # Get the similarity between the two background colours
-                backgroundDiff = mostCommonCurrent - mostCommonOriginal
-                backgroundSimilarity = (16777215 - backgroundDiff) / 16777215
-
-                # Figure out an offset to be applied to the similarity to reduce the effect of solid colour backgrounds on similarity
-                similarityOffset = backgroundSimilarity * backgroundPercentage
-
-                grayA = cv2.cvtColor(originalArray, cv2.COLOR_RGB2GRAY)
-                grayB = cv2.cvtColor(curMemeArray, cv2.COLOR_RGB2GRAY)
-
-                (score, diff) = compare_ssim(grayA, grayB, full=True)
-                score -= abs(similarityOffset)
-                score *= 100
-
-                try:
-                    f = await aiofiles.open(f"data/{message.guild.id}/threshold.data")
-                    threshold = int(await f.read())
-                    await f.close()
-
-                except:
-                    threshold = 25
-
-                if score > threshold:
-                    print("Score " + str(score))
-                    print("Offset " + str(similarityOffset))
-                    stolen = True
-                    try:
-                        channelID, messageID = i.split(".")[0].split("-")
-                        channel = message.guild.get_channel(int(channelID))
-                        originalMessage = await channel.fetch_message(int(messageID))
-                        em = discord.Embed(
-                            title="Meme Stolen",
-                            description=f"[Sent {arrow.arrow.Arrow.fromdatetime(originalMessage.created_at).humanize(arrow.utcnow())} by]({originalMessage.jump_url})  <@{originalMessage.author.id}>",
-                            colour=16711680,
-                        )
-                        await message.channel.send(embed=em)
-
-                    except:
-                        pass
-
-            except Exception as e:
-                print(e)
-                pass
-            count += 1
-
-        if not stolen:
-            print(
-                "{} ({}) > {} ({}): Meme Detected".format(
-                    message.guild.name,
-                    message.guild.id,
-                    message.author.name,
-                    message.author.id,
-                )
-            )  # Log that a meme has been detected
-
-            try:
-                extension = message.attachments[0].filename.split(".")[1]
-
-            except:
-                extension = memeUrl.split(".")[-1].split("?")[0]
-
-            try:
-                newMeme.save(
-                    f"data/{message.guild.id}/images/{message.channel.id}-{message.id}.png"
-                )
-
-            except:
-                newMeme.save(
-                    f"data/{message.guild.id}/images/{message.channel.id}-{message.id}.{extension}"
-                )
+        if len(duplicates[curFilePath]) > 0:
+            stolen = True
+            os.remove(f"images/{curFilePath}")
+            origMessage = await message.channel.fetch_message(os.path.splitext(duplicates[curFilePath][0][0])[0])
+            confidence = f"{int(round(duplicates[curFilePath][0][1],2)*100)}%"
+            em = discord.Embed(title="Repost Detected", description=f"Matches [this post]({origMessage.jump_url}) from <@{origMessage.author.id}> with {confidence} confidence.", colour=16711680)
+            await message.channel.send(embed=em)
 
         else:
-            print(
-                "{} ({}) > {} ({}): Stolen Meme Detected".format(
-                    message.guild.name,
-                    message.guild.id,
-                    message.author.name,
-                    message.author.id,
-                )
-            )  # Log that a stolen meme has been detected
+            stolen = False
 
-        if not stolen:
             try:
                 # Load leaderboard into a dictionary
                 f = await aiofiles.open(f"data/{message.guild.id}/leaderboard.data")
